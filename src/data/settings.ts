@@ -31,6 +31,7 @@ export interface Settings {
   /* レンダリング */
   enableBackgroundRendering: boolean; // プラグインのリロードが必要
   patchPDFExport: boolean;
+  enableSvgTextSelection: boolean;
   autoBaseColor: boolean;
   baseColor: string;
 
@@ -81,6 +82,7 @@ export const DEFAULT_SETTINGS: Settings = {
   /* レンダリング */
   enableBackgroundRendering: true,
   patchPDFExport: false,
+  enableSvgTextSelection: false,
   autoBaseColor: true,
   baseColor: '#000000',
 

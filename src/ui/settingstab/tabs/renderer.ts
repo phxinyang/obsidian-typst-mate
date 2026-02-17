@@ -37,6 +37,17 @@ export function addRendererTab(plugin: ObsidianTypstMate, containerEl: HTMLEleme
     });
 
   new Setting(containerEl)
+    .setName('Enable SVG Text Selection')
+    .setDesc('Add transparent text layer to SVG for text selection. May impact performance.')
+    .addToggle((toggle) => {
+      toggle.setValue(plugin.settings.enableSvgTextSelection ?? DEFAULT_SETTINGS.enableSvgTextSelection!);
+      toggle.onChange((value) => {
+        plugin.settings.enableSvgTextSelection = value;
+        plugin.saveSettings();
+      });
+    });
+
+  new Setting(containerEl)
     .setName('Use Theme Text Color')
     .setDesc("Uses Obsidian's text color as the base color automatically.")
     .addToggle((toggle) => {

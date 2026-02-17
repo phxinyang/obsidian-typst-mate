@@ -5,3 +5,4 @@ pub mod package;
 
 pub mod pdf;
 pub mod svg;
+pub mod svg_text;

@@ -25,7 +25,7 @@ mod serde;
 mod vfs;
 mod world;
 
-use crate::serde::{diagnostic, font, jump, package, pdf, svg};
+use crate::serde::{diagnostic, font, jump, package, pdf, svg, svg_text};
 use crate::world::WasmWorld;
 
 #[wasm_bindgen]
@@ -176,7 +176,7 @@ impl Typst {
         }
     }
 
-    pub fn svg(&mut self, code: &str, kind: &str, id: &str) -> Result<JsValue, JsValue> {
+    pub fn svg(&mut self, code: &str, kind: &str, id: &str, enable_text_selection: bool) -> Result<JsValue, JsValue> {
         if self.last_kind == kind && self.last_id == id {
             self.world.replace(code);
         } else {
@@ -194,9 +194,21 @@ impl Typst {
                 }
 
                 // ? typst_svg::svg は背景が透過しない
-                let svg = typst_svg::svg_frame(&document.pages[0].frame)
+                let mut svg = typst_svg::svg_frame(&document.pages[0].frame)
                     .replace("#000000", "var(--typst-base-color)")
                     .replacen("<svg class", "<svg style=\"overflow: visible;\" class", 1);
+
+                if enable_text_selection {
+                    let text_layer = svg_text::generate_text_layer_for_frame(&document.pages[0].frame);
+                    if let Some(pos) = svg.rfind("</svg>") {
+                        let style_and_text = format!(
+                            r#"<style>svg text {{ fill: rgba(0, 0, 0, 0.004) !important; }}</style>{}"#,
+                            text_layer
+                        );
+                        svg.insert_str(pos, &style_and_text);
+                    }
+                }
+
                 self.last_document = Some(document);
 
                 svg::svg(svg, warnings, &self.world)
