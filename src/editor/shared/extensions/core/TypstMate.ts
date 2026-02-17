@@ -123,6 +123,7 @@ const parseRegion = (view: EditorView, helper: EditorHelper, region: TypstRegion
 export class TypstMateCorePluginValue implements PluginValue {
   typstRegions: TypstRegion[] = [];
   activeRegion: ParsedRegion | null = null;
+  lastActiveRegion: ParsedRegion | null = null;
   computeDebounce: (view: EditorView) => void;
 
   constructor(view: EditorView) {
@@ -198,6 +199,7 @@ export class TypstMateCorePluginValue implements PluginValue {
     const region = regions.find((r) => r.from <= cursor && cursor <= r.to);
     if (!region) return this.unsetActiveRegion(helper);
     this.activeRegion = parseRegion(view, helper, region);
+    this.lastActiveRegion = this.activeRegion;
   }
 
   computeSelection(view: EditorView) {
@@ -214,6 +216,7 @@ export class TypstMateCorePluginValue implements PluginValue {
     if (!region) return this.unsetActiveRegion(helper);
 
     this.activeRegion = parseRegion(view, helper, region);
+    this.lastActiveRegion = this.activeRegion;
   }
 
   private unsetActiveRegion(helper?: EditorHelper) {
@@ -229,6 +232,13 @@ export function getActiveRegion(view: EditorView): ParsedRegion | null {
   if (!pluginVal) return null;
 
   return pluginVal.activeRegion;
+}
+
+export function getLastRegion(view: EditorView): ParsedRegion | null {
+  const pluginVal = view.plugin(typstMateCore);
+  if (!pluginVal) return null;
+
+  return pluginVal.lastActiveRegion;
 }
 
 export function getRegionAt(view: EditorView, cursor: number): ParsedRegion | null {

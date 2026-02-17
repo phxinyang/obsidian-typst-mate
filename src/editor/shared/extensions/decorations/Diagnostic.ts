@@ -4,7 +4,7 @@ import type { EditorView } from '@codemirror/view';
 import type { Processor, ProcessorKind } from '@/libs/processor';
 
 import { editorHelperFacet } from '../core/Helper';
-import { getActiveRegion } from '../core/TypstMate';
+import { getActiveRegion, getLastRegion } from '../core/TypstMate';
 import './Diagnostic.css';
 
 interface TypstDiagnostic extends Diagnostic {
@@ -24,16 +24,17 @@ export const diagnosticExtension = linter(
     const helper = view.state.facet(editorHelperFacet);
     if (!helper) return [];
 
-    const region = getActiveRegion(view);
+    const region = getActiveRegion(view) ?? getLastRegion(view);
     if (!region) return [];
+    if (region.kind === 'codeblock') return [];
 
     const result = view.state.field(diagnosticsState);
     if (!result) return [];
     if (result.noDiag) return [];
+    if (region.kind !== result.kind) return [];
 
     const { noPreamble, format } = result.processor;
-    const diagnostics = result.diags
-      .map((diag) => {
+    const diagnostics = result.diags.flatMap((diag) => {
         const offset =
           region.from -
           format.indexOf('{CODE}') -
@@ -41,9 +42,20 @@ export const diagnosticExtension = linter(
           helper.plugin.typstManager.preamble.length -
           1;
 
-        return {
-          from: diag.from + offset,
-          to: diag.to + offset,
+        const mappedFrom = diag.from + offset;
+        const mappedTo = diag.to + offset;
+        const inRegion = region.from <= mappedFrom && mappedTo <= region.to;
+        if (!inRegion) return [];
+
+        const docLen = view.state.doc.length;
+        const from = mappedFrom;
+        const to = mappedTo;
+        const safeFrom = Math.max(0, Math.min(from, docLen));
+        const safeTo = Math.max(safeFrom, Math.min(to, docLen));
+
+        return [{
+          from: safeFrom,
+          to: safeTo,
           message: '',
           severity: diag.severity,
           renderMessage: () => {
@@ -68,9 +80,8 @@ export const diagnosticExtension = linter(
             }
             return container;
           },
-        };
-      })
-      .filter((diag) => region.from <= diag.from && diag.to <= region.to);
+        }];
+      });
 
     return diagnostics;
   },

@@ -4,6 +4,30 @@
   cursor: pointer;
 }
 
+typstmate-svg.typstmate-with-error-indicator {
+  position: relative;
+}
+
+/* .typstmate-error-indicator {
+  position: absolute;
+  top: 0.1em;
+  right: 0.1em;
+  width: 0.95em;
+  height: 0.95em;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7em;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-on-accent);
+  background-color: var(--text-error);
+  border: 1px solid var(--background-modifier-border);
+  z-index: 1;
+} */
+
 /* inline */
 .typstmate-inline {
   display: inline-block;
