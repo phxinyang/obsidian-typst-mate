@@ -5,7 +5,91 @@ import type { Diagnostic, SVGResult } from '@/libs/worker';
 import TypstElement from './Typst';
 
 export default class TypstSVGElement extends TypstElement {
+  /** Cross-instance cache: last successfully used parent width (px). */
+  private static savedFitWidthPx: number | null = null;
+
+  private renderSeq = 0;
+  private lockedWidthPx: number | null = null;
+  private recalcTimer: number | null = null;
+
+  // --- helpers ---------------------------------------------------------------
+
+  private isFitMode() {
+    return this.kind !== 'inline' && this.processor.fitToParentWidth && !this.source.includes('<br>');
+  }
+
+  /** Read parent width now; returns null when unavailable. */
+  private readParentWidthPx(): number | null {
+    const w = this.parentElement?.getBoundingClientRect().width;
+    return Number.isFinite(w) && w !== undefined && w > 0 ? w : null;
+  }
+
+  /** Resolve the width (px) to use for the current render. */
+  private resolveWidthPx(): number | null {
+    return this.lockedWidthPx ?? TypstSVGElement.savedFitWidthPx;
+  }
+
+  /** Build the Typst input, injecting `#let WIDTH` when valid. */
+  private buildInput(): string {
+    const formatted = this.format();
+    if (!this.isFitMode()) return formatted;
+
+    const wpx = this.resolveWidthPx();
+    if (wpx === null || !Number.isFinite(wpx) || wpx <= 0)
+      return formatted.replaceAll('width: WIDTH', 'width: auto');
+
+    return (
+      `#let WIDTH = ${(wpx * 3) / 4}pt\n` +
+      formatted.replaceAll('width: auto', 'width: WIDTH')
+    );
+  }
+
+  /** Force a fit-width rerender with the given px value. */
+  private refit(widthPx: number) {
+    if (!Number.isFinite(widthPx) || widthPx <= 0) return;
+
+    this.lockedWidthPx = widthPx;
+    TypstSVGElement.savedFitWidthPx = widthPx;
+
+    const input =
+      `#let WIDTH = ${(widthPx * 3) / 4}pt\n` +
+      this.format().replaceAll('width: auto', 'width: WIDTH');
+
+    const seq = ++this.renderSeq;
+    const res = this.plugin.typst.svg(
+      input, this.kind, this.id, this.plugin.settings.enableSvgTextSelection,
+    ) as Promise<SVGResult>;
+
+    res
+      .then((r) => { if (seq === this.renderSeq) this.postProcess(r); })
+      .catch((e: Diagnostic[]) => { if (seq === this.renderSeq) this.handleError(e); });
+  }
+
+  // --- layout-change handlers ------------------------------------------------
+
+  private onLayoutChange = () => {
+    if (!this.isFitMode() || !this.isConnected) return;
+    if (this.recalcTimer !== null) clearTimeout(this.recalcTimer);
+    this.recalcTimer = window.setTimeout(() => {
+      this.recalcTimer = null;
+      if (!this.isConnected) return;
+      const w = this.readParentWidthPx();
+      if (w !== null) this.refit(w);
+    }, 150);
+  };
+
+  private onBeforePrint = () => {
+    if (!this.isFitMode() || !this.isConnected) return;
+    const w = this.readParentWidthPx();
+    if (w !== null) this.refit(w);
+  };
+
+  // --- lifecycle -------------------------------------------------------------
+
   override connectedCallback() {
+    window.addEventListener('resize', this.onLayoutChange);
+    window.addEventListener('beforeprint', this.onBeforePrint);
+
     this.addEventListener('contextmenu', (event) => {
       const svg = this.querySelector('svg');
       if (!svg) return;
@@ -32,6 +116,15 @@ export default class TypstSVGElement extends TypstElement {
         view.editor.cm.plugin(jumpFromClickPlugin)?.jumpTo(result, this);
       }
     });
+  }
+
+  override disconnectedCallback() {
+    window.removeEventListener('resize', this.onLayoutChange);
+    window.removeEventListener('beforeprint', this.onBeforePrint);
+    if (this.recalcTimer !== null) {
+      clearTimeout(this.recalcTimer);
+      this.recalcTimer = null;
+    }
   }
 
   constructor() {
@@ -113,36 +206,42 @@ export default class TypstSVGElement extends TypstElement {
   }
 
   async render() {
-    const input = this.format();
+    // Lock width on first render when fit-mode is active
+    if (this.isFitMode() && this.lockedWidthPx === null) {
+      const w = this.readParentWidthPx();
+      if (w !== null) {
+        this.lockedWidthPx = w;
+        TypstSVGElement.savedFitWidthPx = w;
+      }
+    }
+
+    const input = this.buildInput();
 
     try {
       const result = this.plugin.typst.svg(input, this.kind, this.id, this.plugin.settings.enableSvgTextSelection);
+      const seq = ++this.renderSeq;
 
       if (result instanceof Promise) {
-        if (this.kind !== 'inline' && this.processor.fitToParentWidth && !this.source.includes('<br>')) {
+        if (this.isFitMode() && this.lockedWidthPx === null) {
+          // Width wasn't available yet — use observer to grab it once
           this.noDiag = true;
           this.plugin.observer.register(
             this,
             (entry: ResizeObserverEntry) => {
-              const input =
-                `#let WIDTH = ${(entry.contentRect.width * 3) / 4}pt\n` +
-                this.format().replace('width: auto', 'width: WIDTH');
-
-              const result = this.plugin.typst.svg(input, this.kind, this.id, this.plugin.settings.enableSvgTextSelection) as Promise<SVGResult>;
-
-              result
-                .then((result: SVGResult) => this.postProcess(result))
-                .catch((err: Diagnostic[]) => {
-                  this.handleError(err);
-                });
+              if (this.lockedWidthPx !== null) return; // already locked
+              const w =
+                Number.isFinite(entry.contentRect.width) && entry.contentRect.width > 0
+                  ? entry.contentRect.width
+                  : this.readParentWidthPx();
+              if (w !== null) this.refit(w);
             },
             300,
           );
         }
 
         result
-          .then((result: SVGResult) => this.postProcess(result))
-          .catch((err: Diagnostic[]) => this.handleError(err));
+          .then((r: SVGResult) => { if (seq === this.renderSeq) this.postProcess(r); })
+          .catch((e: Diagnostic[]) => { if (seq === this.renderSeq) this.handleError(e); });
       } else this.postProcess(result);
     } catch (err) {
       this.handleError(err as Diagnostic[]);
