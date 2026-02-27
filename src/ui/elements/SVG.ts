@@ -18,9 +18,33 @@ export default class TypstSVGElement extends TypstElement {
     return this.kind !== 'inline' && this.processor.fitToParentWidth && !this.source.includes('<br>');
   }
 
-  /** Read parent width now; returns null when unavailable. */
+  /** Read parent width now; returns null when unavailable.
+   *  Walks up the DOM to find the content-area container so that the width
+   *  is consistent between reading-mode and live-preview regardless of
+   *  theme-injected padding on intermediate wrappers (e.g. HyperMD-codeblock). */
   private readParentWidthPx(): number | null {
-    const w = this.parentElement?.getBoundingClientRect().width;
+    // In live-preview the typstmate-svg sits inside layers like:
+    //   .cm-content > [contenteditable="false"] > div.HyperMD-codeblock > code > typstmate-svg
+    // We want the width of [contenteditable="false"] (the widget wrapper) or,
+    // in reading-mode, the direct parent div provided by Obsidian.
+    let el: HTMLElement | null = this.parentElement;
+    while (el) {
+      // In reading mode: the first parent is the container div from Obsidian's
+      // registerMarkdownCodeBlockProcessor – it has no HyperMD classes.
+      // In live preview: walk up past <code> and .HyperMD-codeblock to the
+      // [contenteditable="false"] widget wrapper.
+      if (el.hasAttribute('contenteditable') || el.classList.contains('markdown-preview-section')) {
+        break;
+      }
+      // Stop if we reach .cm-content – don't go further than needed
+      if (el.classList.contains('cm-content')) {
+        break;
+      }
+      el = el.parentElement;
+    }
+    // Fall back to direct parent if walk found nothing useful
+    const target = el ?? this.parentElement;
+    const w = target?.getBoundingClientRect().width;
     return Number.isFinite(w) && w !== undefined && w > 0 ? w : null;
   }
 
@@ -227,12 +251,12 @@ export default class TypstSVGElement extends TypstElement {
           this.noDiag = true;
           this.plugin.observer.register(
             this,
-            (entry: ResizeObserverEntry) => {
+            (_entry: ResizeObserverEntry) => {
               if (this.lockedWidthPx !== null) return; // already locked
-              const w =
-                Number.isFinite(entry.contentRect.width) && entry.contentRect.width > 0
-                  ? entry.contentRect.width
-                  : this.readParentWidthPx();
+              // Always use parent width, not the element's own contentRect width,
+              // because contentRect reflects the SVG's intrinsic size which may
+              // differ from the intended container width.
+              const w = this.readParentWidthPx();
               if (w !== null) this.refit(w);
             },
             300,
